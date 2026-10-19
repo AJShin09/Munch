@@ -2,8 +2,10 @@
 import { Token, TokenRule, SourcePos, Diagnostic, LexerTraceStep } from '../types';
 import { compileRegexToDfa } from './regexToAutomaton';
 import { compileRuleRegex } from '../lexer';
+import { buildSourcePositionIndex, offsetToSourcePos } from './sourcePosition';
 
-/** Compute line and column (0-based) from character offset */
+/** Compute line/column from an offset. Kept for callers that need a one-off
+ *  lookup; hot scanning loops use a prebuilt SourcePositionIndex instead. */
 export function computeSourcePos(source: string, offset: number): SourcePos {
   const before = source.slice(0, offset);
   const lines = before.split(/\r?\n/);
@@ -69,6 +71,7 @@ export class SteppedLexer {
     const tokens: Token[] = [];
     const diagnostics: Diagnostic[] = [...this.ruleDiagnostics];
     const traceSteps: LexerTraceStep[] = [];
+    const positions = buildSourcePositionIndex(source);
 
     let pos = 0;
     const length = source.length;
@@ -86,7 +89,7 @@ export class SteppedLexer {
 
     while (pos < length) {
       const currentChar = source[pos];
-      const currentPos = computeSourcePos(source, pos);
+      const currentPos = offsetToSourcePos(positions, pos);
 
       // ── Unterminated block comment: "/*" with no closing "*/" before EOF ──
       if (currentChar === '/' && source[pos + 1] === '*' && source.indexOf('*/', pos + 2) === -1) {
@@ -94,7 +97,7 @@ export class SteppedLexer {
           severity: 'warning',
           message: 'Unterminated block comment: "/*" has no closing "*/" before the end of the file.',
           pos: currentPos,
-          endPos: computeSourcePos(source, Math.min(pos + 2, length)),
+          endPos: offsetToSourcePos(positions, Math.min(pos + 2, length)),
           code: 'LEX_UNTERMINATED_BLOCK_COMMENT',
         });
         // Fall through: the '/' will still be tokenized by whichever rule matches.
@@ -106,7 +109,8 @@ export class SteppedLexer {
       for (const { rule, regex } of this.rules) {
         if (!regex) continue;
         try {
-          const match = regex.exec(source.slice(pos));
+          regex.lastIndex = pos;
+          const match = regex.exec(source);
           // Ignore failed and zero-length matches (zero-length would stall the scanner)
           if (match && match[0].length > 0) {
             const matched = match[0];
@@ -135,7 +139,7 @@ export class SteppedLexer {
         }
 
         const startPos = currentPos;
-        const endPos = computeSourcePos(source, pos + bestMatch.text.length);
+        const endPos = offsetToSourcePos(positions, pos + bestMatch.text.length);
 
         const token: Token = {
           type: bestMatch.rule.name,
@@ -172,7 +176,7 @@ export class SteppedLexer {
             severity: 'warning',
             message: `Incomplete numeric literal: "${bestMatch.text}${expChar}" has no exponent digits after '${expChar}'.`,
             pos: startPos,
-            endPos: computeSourcePos(source, Math.min(afterPos + 1, length)),
+            endPos: offsetToSourcePos(positions, Math.min(afterPos + 1, length)),
             code: 'LEX_INVALID_NUMBER',
           });
         }
@@ -181,24 +185,25 @@ export class SteppedLexer {
       } else {
         // No rule matched: Emit UNKNOWN token & register diagnostic
         const startPos = currentPos;
-        const endPos = computeSourcePos(source, pos + 1);
+        const endPos = offsetToSourcePos(positions, pos + 1);
 
         const isQuote = currentChar === '"' || currentChar === "'" || currentChar === '`';
         const diag: Diagnostic = isQuote
           ? {
               severity: 'error',
-              message: `Unterminated string literal: opening ${currentChar} has no matching closing quote before end of input or line.`,
+              message: `Unterminated string literal: "${currentChar}" has no closing quote before the end of the line.`,
               pos: startPos,
               endPos,
               code: 'LEX_UNTERMINATED_STRING',
             }
           : {
               severity: 'error',
-              message: `Unrecognized character '${currentChar}' (ASCII code ${currentChar.charCodeAt(0)}) — no enabled token rule matches it.`,
+              message: `Unrecognized character '${currentChar}' (code ${currentChar.charCodeAt(0)}) has no matching rule.`,
               pos: startPos,
               endPos,
               code: 'LEX_UNRECOGNIZED_CHAR',
             };
+
         diagnostics.push(diag);
 
         const unknownToken: Token = {
@@ -206,6 +211,7 @@ export class SteppedLexer {
           lexeme: currentChar,
           start: startPos,
           end: endPos,
+          ruleName: undefined,
           diagnostic: diag,
         };
         tokens.push(unknownToken);

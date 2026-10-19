@@ -667,9 +667,27 @@ export function compileRegexToNfa(name: string, regexStr: string, opts?: Compile
   return opts?.ignoreCase ? expandIgnoreCase(nfa) : nfa;
 }
 
-/** Compile a regular expression directly to a minimized DFA */
+/** Memo table for compiled DFAs. Re-analysing the source after every keystroke
+ *  would otherwise recompile every enabled rule's automaton from scratch, which
+ *  dominates the whole analysis. Keyed by rule identity (name + flags + pattern);
+ *  bounded so editing rule definitions cannot grow it without limit. */
+const DFA_CACHE_LIMIT = 256;
+const dfaCache = new Map<string, Automaton>();
+
+/** Compile a regular expression directly to a minimized DFA (memoized).
+ *  The returned automaton is treated as immutable/shared by all callers. */
 export function compileRegexToDfa(name: string, regexStr: string, opts?: CompileOptions): Automaton {
+  const key = `${name}\u0000${opts?.ignoreCase ? 'i' : ''}\u0000${regexStr}`;
+  const cached = dfaCache.get(key);
+  if (cached) return cached;
+
   const nfa = compileRegexToNfa(name, regexStr, opts);
-  const dfa = convertNfaToDfa(nfa);
-  return minimizeDfa(dfa);
+  const dfa = minimizeDfa(convertNfaToDfa(nfa));
+
+  if (dfaCache.size >= DFA_CACHE_LIMIT) {
+    const oldest = dfaCache.keys().next().value;
+    if (oldest !== undefined) dfaCache.delete(oldest);
+  }
+  dfaCache.set(key, dfa);
+  return dfa;
 }

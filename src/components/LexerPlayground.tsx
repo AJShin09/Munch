@@ -1,11 +1,13 @@
 // src/components/LexerPlayground.tsx
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Token, TokenRule, Automaton } from '../types';
-import { SteppedLexer, LexerAnalysisResult, computeSourcePos } from '../engine/steppedLexer';
+import { SteppedLexer, LexerAnalysisResult } from '../engine/steppedLexer';
+import { buildSourcePositionIndex, offsetToSourcePos } from '../engine/sourcePosition';
 import { AutomatonGraph } from './AutomatonGraph';
 import { compileRegexToDfa } from '../engine/regexToAutomaton';
 import { simulateAutomaton } from '../engine/automaton';
 import { deriveDfaPanelModel } from '../engine/dfaPanelModel';
+import { buildSyntaxSegments } from '../engine/syntaxHighlight';
 
 interface LexerPlaygroundProps {
   sourceCode: string;
@@ -20,6 +22,61 @@ function displayChar(ch: string | undefined): string {
   if (ch === '\t') return '\\t';
   if (ch === ' ') return '␣';
   return ch;
+}
+
+interface VerticalSplit {
+  height: number;
+  collapsed: boolean;
+  setCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
+  onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onPointerUp: (e: React.PointerEvent<HTMLDivElement>) => void;
+}
+
+// Shared drag-to-resize / collapse behavior for the playground's vertical
+// splits (source editor ↔ token stream and DFA panel ↔ trace panel). The
+// dragged panel keeps a fixed pixel height; its sibling flexes to fill the
+// rest. `reserve` is the minimum space kept for the sibling and `floor` the
+// smallest allowed ceiling, so the split stays sane in short columns.
+function useVerticalSplit(
+  colRef: React.RefObject<HTMLDivElement | null>,
+  initialHeight: number,
+  opts: { min?: number; reserve?: number; floor?: number } = {}
+): VerticalSplit {
+  const { min = 120, reserve = 150, floor = 160 } = opts;
+  const [height, setHeight] = useState(initialHeight);
+  const [collapsed, setCollapsed] = useState(false);
+  const drag = useRef<{ y: number; h: number } | null>(null);
+
+  const maxHeight = () => {
+    const col = colRef.current;
+    return col ? Math.max(floor, col.getBoundingClientRect().height - reserve) : 900;
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { y: e.clientY, h: height };
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!drag.current) return;
+    const next = drag.current.h + (e.clientY - drag.current.y);
+    setHeight(Math.min(maxHeight(), Math.max(min, Math.round(next))));
+  };
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    drag.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
+
+  useEffect(() => {
+    const clamp = () => setHeight(h => Math.min(h, maxHeight()));
+    window.addEventListener('resize', clamp);
+    return () => window.removeEventListener('resize', clamp);
+  }, []);
+
+  return { height, collapsed, setCollapsed, onPointerDown, onPointerMove, onPointerUp };
 }
 
 export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
@@ -38,7 +95,26 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
   const [dfaPlaying, setDfaPlaying] = useState(false);
 
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const highlightRef = useRef<HTMLPreElement | null>(null);
   const playTimerRef = useRef<number | null>(null);
+  const leftColRef = useRef<HTMLDivElement | null>(null);
+  const rightColRef = useRef<HTMLDivElement | null>(null);
+
+  // Both the source editor and the DFA panel are user-resizable + collapsible.
+  const editorSplit = useVerticalSplit(
+    leftColRef,
+    typeof window === 'undefined' ? 320 : Math.min(560, Math.max(200, Math.round((window.innerHeight - 95) * 0.52))),
+    { min: 120, reserve: 150, floor: 160 }
+  );
+  const dfaSplit = useVerticalSplit(
+    rightColRef,
+    typeof window === 'undefined' ? 320 : Math.max(200, Math.round((window.innerHeight - 95) * 0.5)),
+    { min: 200, reserve: 200, floor: 200 }
+  );
+  const editorHeight = editorSplit.height;
+  const editorCollapsed = editorSplit.collapsed;
+  const dfaHeight = dfaSplit.height;
+  const dfaCollapsed = dfaSplit.collapsed;
 
   // Analysis is recomputed synchronously from (sourceCode, rules), so the token
   // stream, diagnostics and trace can never show a stale result for a previous
@@ -132,6 +208,25 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
     }
   };
 
+  // Usage-based highlighting of the source editor. Segments come from the same
+  // tokenization as the token stream, so the colors can never disagree with the
+  // lexer's own output. Rendered as plain text in an aria-hidden overlay behind
+  // a transparent-text textarea.
+  const syntaxSegments = useMemo(
+    () => buildSyntaxSegments(sourceCode, analysis.tokens, rules),
+    [sourceCode, analysis.tokens, rules]
+  );
+
+  const syncHighlightScroll = () => {
+    const ta = editorRef.current;
+    const pre = highlightRef.current;
+    if (ta && pre) {
+      pre.scrollTop = ta.scrollTop;
+      pre.scrollLeft = ta.scrollLeft;
+    }
+  };
+  useEffect(syncHighlightScroll, [sourceCode, syntaxSegments]);
+
   const step = (delta: number) => setCurrentStepIdx(i => Math.max(0, Math.min(analysis.traceSteps.length - 1, i + delta)));
   const jumpToNextToken = () => {
     for (let i = currentStepIdx + 1; i < analysis.traceSteps.length; i++) {
@@ -184,7 +279,10 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
     });
   }, [dfaSteps, selectedToken]);
 
-  const eofPos = computeSourcePos(sourceCode, sourceCode.length);
+  // Precomputed line index so the trace table maps every row's offset to a
+  // line:column in O(log n) instead of re-splitting the whole prefix per row.
+  const posIndex = useMemo(() => buildSourcePositionIndex(sourceCode), [sourceCode]);
+  const eofPos = offsetToSourcePos(posIndex, sourceCode.length);
 
   // DFA character-level play loop (independent from the token-level play)
   useEffect(() => {
@@ -206,7 +304,7 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
     <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', height: H, overflow: 'hidden', background: 'var(--bg-primary)' }}>
 
       {/* ── LEFT: Editor + Token Stream ── */}
-      <div style={{ display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border-color)', overflow: 'hidden' }}>
+      <div ref={leftColRef} style={{ display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border-color)', overflow: 'hidden' }}>
 
         {/* Controls header */}
         <div className="panel-header" style={{ flexWrap: 'wrap', gap: 6 }}>
@@ -224,6 +322,11 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
             <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: 12 }} onClick={jumpToNextToken}>» Token</button>
             <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: 12 }} onClick={jumpToNextError}>⚠ Error</button>
             <button className="btn-icon" onClick={() => { setIsPlaying(false); setCurrentStepIdx(0); }} title="Reset">⟲</button>
+            <button className="btn-icon"
+              onClick={() => editorSplit.setCollapsed(c => !c)}
+              title={editorCollapsed ? 'Expand source editor' : 'Minimize source editor'}>
+              {editorCollapsed ? '▸' : '▾'}
+            </button>
           </div>
         </div>
 
@@ -245,26 +348,52 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
           </div>
         </div>
 
-        {/* Source Editor */}
-        <div className="source-editor-wrap" style={{ flex: 1, minHeight: 150, overflow: 'hidden' }}>
-          <div className="source-line-nums">
-            {sourceCode.split('\n').map((_, i) => <div key={i}>{i + 1}</div>)}
+        {/* Source Editor (resizable, collapsible) */}
+        {!editorCollapsed && (
+          <div className="source-editor-wrap" style={{ flex: '0 0 auto', height: editorHeight, minHeight: 0, overflow: 'hidden' }}>
+            <div className="source-line-nums">
+              {sourceCode.split('\n').map((_, i) => <div key={i}>{i + 1}</div>)}
+            </div>
+            <div className="source-code-area">
+              <pre ref={highlightRef} className="source-highlight" aria-hidden="true">
+                {syntaxSegments.map((seg, i) => (
+                  <span key={i} className={seg.cls ? `syn-${seg.cls}` : undefined}>{seg.text}</span>
+                ))}
+                {(sourceCode === '' || sourceCode.endsWith('\n')) ? '\u200b' : null}
+              </pre>
+              <textarea
+                ref={editorRef}
+                className="source-textarea"
+                value={sourceCode}
+                onChange={e => setSourceCode(e.target.value)}
+                onScroll={syncHighlightScroll}
+                spellCheck={false}
+              />
+            </div>
           </div>
-          <textarea
-            ref={editorRef}
-            className="source-textarea"
-            value={sourceCode}
-            onChange={e => setSourceCode(e.target.value)}
-            spellCheck={false}
+        )}
+
+        {/* Splitter: drag to resize the editor, double-click to minimize */}
+        {!editorCollapsed && (
+          <div
+            className="source-resizer"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize source editor"
+            title="Drag to resize · double-click to minimize"
+            onPointerDown={editorSplit.onPointerDown}
+            onPointerMove={editorSplit.onPointerMove}
+            onPointerUp={editorSplit.onPointerUp}
+            onDoubleClick={() => editorSplit.setCollapsed(true)}
           />
-        </div>
+        )}
 
         {/* Token Stream */}
         <div style={{
           display: 'flex', flexDirection: 'column',
           borderTop: '1px solid var(--border-color)',
-          background: 'var(--bg-secondary)', flex: '0 0 auto',
-          maxHeight: '38%', overflow: 'hidden',
+          background: 'var(--bg-secondary)', flex: '1 1 auto',
+          minHeight: 0, overflow: 'hidden',
         }}>
           <div className="panel-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -305,17 +434,25 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
       </div>
 
       {/* ── RIGHT: Automaton + Trace ── */}
-      <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div ref={rightColRef} style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-        {/* Automaton panel */}
-        <div style={{ flex: '1 1 50%', display: 'flex', flexDirection: 'column', borderBottom: '1px solid var(--border-color)', overflow: 'hidden', minHeight: 200 }}>
+        {/* Automaton panel (resizable, collapsible) */}
+        {!dfaCollapsed && (
+        <div style={{ flex: '0 0 auto', height: dfaHeight, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
           <div className="panel-header">
-            <span className="panel-label">Token Recognizer DFA</span>
-            {selectedToken && (
-              <span className="badge badge-blue">
-                {selectedToken.type} · "{selectedToken.lexeme.slice(0, 24)}"
-              </span>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              <span className="panel-label">Token Recognizer DFA</span>
+              {selectedToken && (
+                <span className="badge badge-blue">
+                  {selectedToken.type} · "{selectedToken.lexeme.slice(0, 24)}"
+                </span>
+              )}
+            </div>
+            <button className="btn-icon"
+              onClick={() => dfaSplit.setCollapsed(c => !c)}
+              title="Minimize DFA panel">
+              ▾
+            </button>
           </div>
           <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
             <AutomatonGraph automaton={tokenAutomaton} activeStates={dfaModel.activeStates} activeTransition={activeTransition} interactive />
@@ -431,9 +568,36 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
             </div>
           )}
         </div>
+        )}
+
+        {dfaCollapsed && (
+          <div className="panel-header" style={{ flexShrink: 0 }}>
+            <span className="panel-label">Token Recognizer DFA</span>
+            <button className="btn-icon"
+              onClick={() => dfaSplit.setCollapsed(false)}
+              title="Expand DFA panel">
+              ▸
+            </button>
+          </div>
+        )}
+
+        {/* Splitter: drag to resize the DFA panel, double-click to minimize */}
+        {!dfaCollapsed && (
+          <div
+            className="source-resizer"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize DFA panel"
+            title="Drag to resize · double-click to minimize"
+            onPointerDown={dfaSplit.onPointerDown}
+            onPointerMove={dfaSplit.onPointerMove}
+            onPointerUp={dfaSplit.onPointerUp}
+            onDoubleClick={() => dfaSplit.setCollapsed(true)}
+          />
+        )}
 
         {/* Execution Trace / Diagnostics */}
-        <div style={{ flex: '1 1 50%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
           {/* Sub-tabs */}
           <div style={{ display: 'flex', background: 'var(--panel-bg)', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
             <button className={`tab-button${activePanel === 'trace' ? ' active' : ''}`}
@@ -484,7 +648,7 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
                   </thead>
                   <tbody>
                     {analysis.traceSteps.map((step, idx) => {
-                      const p = computeSourcePos(sourceCode, step.pos);
+                        const p = offsetToSourcePos(posIndex, step.pos);
                       return (
                         <tr key={idx} className={currentStepIdx === idx ? 'current' : ''} onClick={() => setCurrentStepIdx(idx)}>
                           <td style={{ color: 'var(--text-dim)' }}>{step.stepIndex}</td>

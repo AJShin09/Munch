@@ -1,24 +1,17 @@
 // src/lexer.ts
-import { Token, TokenRule, SourcePos } from './types';
+import { Token, TokenRule } from './types';
+import { buildSourcePositionIndex, offsetToSourcePos } from './engine/sourcePosition';
 
-/** Helper to compute line/column from offset */
-function computeSourcePos(source: string, offset: number): SourcePos {
-  const before = source.slice(0, offset);
-  const lines = before.split(/\r?\n/);
-  const line = lines.length - 1; // zero‑based
-  const column = lines[lines.length - 1].length; // zero‑based column in current line
-  return { line, column, offset };
-}
-
-/** Compile a rule regex so it only ever matches at the start of the subject string.
- *  The pattern is wrapped in a non-capturing group before anchoring so that a
- *  top-level alternation such as `a|b` cannot match unanchored on the right branch.
- */
+/** Compile a rule regex into a sticky ("y") matcher: it can only match exactly
+ *  at `regex.lastIndex`, which the scanner sets to the current offset. This is
+ *  equivalent to the old `^(?:…)` + `source.slice(pos)` approach but avoids
+ *  copying the source at every position (an O(n²) cost). The pattern is wrapped
+ *  in a non-capturing group so top-level alternations stay anchored. */
 export function compileRuleRegex(rule: TokenRule): RegExp | null {
   try {
-    return new RegExp(`^(?:${rule.regex})`, rule.caseInsensitive ? 'i' : '');
+    return new RegExp(`(?:${rule.regex})`, (rule.caseInsensitive ? 'i' : '') + 'y');
   } catch {
-    return null; // malformed rule regex – treated as "never matches"
+    return null;
   }
 }
 
@@ -26,20 +19,20 @@ export class Lexer {
   private rules: { rule: TokenRule; regex: RegExp | null }[];
 
   constructor(rules: TokenRule[]) {
-    // sort by priority (lower number = higher priority) for tie‑breaking
     this.rules = rules
       .filter(r => r.enabled)
       .sort((a, b) => a.priority - b.priority)
       .map(rule => ({ rule, regex: compileRuleRegex(rule) }));
   }
 
-  /** Tokenize the given source string.
+  /** Tokenize the source string.
    *  Returns an array of tokens in source order.
    *  Uses maximal munch (longest match wins); equal-length matches are
    *  resolved by deterministic rule priority.
    */
   tokenize(source: string): Token[] {
     const tokens: Token[] = [];
+    const positions = buildSourcePositionIndex(source);
     let pos = 0;
     const length = source.length;
 
@@ -48,7 +41,8 @@ export class Lexer {
 
       for (const { rule, regex } of this.rules) {
         if (!regex) continue;
-        const match = regex.exec(source.slice(pos));
+        regex.lastIndex = pos;
+        const match = regex.exec(source);
         // Ignore failed and zero-length matches (a zero-length match would
         // otherwise stall the scanner forever).
         if (match && match[0].length > 0) {
@@ -62,8 +56,8 @@ export class Lexer {
       }
 
       if (bestMatch) {
-        const startPos = computeSourcePos(source, pos);
-        const endPos = computeSourcePos(source, pos + bestMatch.text.length);
+        const startPos = offsetToSourcePos(positions, pos);
+        const endPos = offsetToSourcePos(positions, pos + bestMatch.text.length);
         tokens.push({
           type: bestMatch.rule.name,
           lexeme: bestMatch.text,
@@ -77,8 +71,8 @@ export class Lexer {
       }
 
       // No rule matched – emit UNKNOWN token for a single character
-      const startPos = computeSourcePos(source, pos);
-      const endPos = computeSourcePos(source, pos + 1);
+      const startPos = offsetToSourcePos(positions, pos);
+      const endPos = offsetToSourcePos(positions, pos + 1);
       tokens.push({
         type: 'UNKNOWN',
         lexeme: source[pos],

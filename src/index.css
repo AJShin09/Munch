@@ -383,6 +383,32 @@ code, pre, kbd, samp, .mono {
   display: flex;
   background: var(--bg-primary);
 }
+
+/* Drag handle between the source editor and the Token Stream. */
+.source-resizer {
+  flex: 0 0 auto;
+  height: 8px;
+  position: relative;
+  cursor: row-resize;
+  background: var(--panel-bg);
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  user-select: none;
+  touch-action: none;
+}
+.source-resizer::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 2px;
+  border-radius: 2px;
+  transform: translate(-50%, -50%);
+  background: var(--text-dim);
+  transition: background 0.15s ease;
+}
+.source-resizer:hover::after { background: var(--accent); }
 .source-line-nums {
   padding: 12px 8px;
   text-align: right;
@@ -398,11 +424,49 @@ code, pre, kbd, samp, .mono {
 }
 .source-line-nums > div { line-height: 1.6; }
 
-.source-textarea {
+.source-code-area {
+  position: relative;
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Syntax-highlighted mirror of the textarea. Sits behind the textarea and is
+   scrolled in lockstep with it; identical padding/font/line-height so glyphs
+   line up exactly. It never receives pointer events. */
+.source-highlight {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  padding: 12px 14px;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--text-main);
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre;
+}
+
+/* The editable layer. Fills the panel exactly (explicit inset instead of
+   relying on flex stretching, which is unreliable for form controls) and sits
+   above the highlight layer, so clicks, the caret, and selection all hit the
+   real input. Its own text is invisible; the colors come from the overlay. */
+.source-textarea {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
   padding: 12px 14px;
   background: transparent;
-  color: var(--text-main);
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--text-main);
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.6;
@@ -411,6 +475,27 @@ code, pre, kbd, samp, .mono {
   resize: none;
   white-space: pre;
   overflow: auto;
+}
+.source-textarea::selection {
+  background: rgba(102, 178, 255, 0.30);
+}
+
+/* Syntax roles — color only, no weight/style/size changes so the overlay keeps
+   perfect metrics with the textarea underneath. */
+.syn-comment { color: var(--text-dim); }
+.syn-keyword { color: var(--ruby); }
+.syn-control { color: var(--amethyst); }
+.syn-string { color: var(--emerald); }
+.syn-number { color: var(--topaz); }
+.syn-variable { color: var(--topaz); }
+.syn-function { color: var(--sapphire); }
+.syn-type { color: var(--sapphire); }
+.syn-operator { color: var(--amethyst); }
+.syn-punct { color: var(--text-muted); }
+.syn-error {
+  color: var(--ruby);
+  text-decoration: underline wavy var(--ruby);
+  text-underline-offset: 2px;
 }
 
 /* ─── Trace Table ─────────────────────────────────────────────────────── */
