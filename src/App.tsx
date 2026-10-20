@@ -5,14 +5,6 @@ import { LANGUAGE_PRESETS } from './defaultRules';
 import { Navbar } from './components/Navbar';
 import { TabsNav, WorkbenchTab } from './components/TabsNav';
 import { LexerPlayground } from './components/LexerPlayground';
-import { TokenRulesView } from './components/TokenRulesView';
-import { AutomatonDesigner } from './components/AutomatonDesigner';
-import { RegexLab } from './components/RegexLab';
-import { GrammarWorkbench } from './components/GrammarWorkbench';
-import { ArdenSolverView } from './components/ArdenSolverView';
-import { LanguageOperationsView } from './components/LanguageOperationsView';
-import { PumpingLemmaView } from './components/PumpingLemmaView';
-import { EquivalenceCheckerView } from './components/EquivalenceCheckerView';
 
 export const App: React.FC = () => {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
@@ -83,23 +75,11 @@ export const App: React.FC = () => {
 
       {/* Main Workbench Viewport */}
       <main style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {activeTab === 'lexer_playground' && (
-          <LexerPlayground
-            sourceCode={sourceCode}
-            setSourceCode={setSourceCode}
-            rules={rules}
-          />
-        )}
-        {activeTab === 'token_rules' && (
-          <TokenRulesView rules={rules} setRules={setRules} />
-        )}
-        {activeTab === 'automaton_designer' && <AutomatonDesigner />}
-        {activeTab === 'regex_lab' && <RegexLab />}
-        {activeTab === 'grammar_workbench' && <GrammarWorkbench />}
-        {activeTab === 'arden_solver' && <ArdenSolverView />}
-        {activeTab === 'language_operations' && <LanguageOperationsView />}
-        {activeTab === 'pumping_lemma' && <PumpingLemmaView />}
-        {activeTab === 'equivalence_checker' && <EquivalenceCheckerView />}
+        <LexerPlayground
+          sourceCode={sourceCode}
+          setSourceCode={setSourceCode}
+          rules={rules}
+        />
       </main>
     </div>
   );

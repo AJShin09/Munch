@@ -1,16 +1,7 @@
 // src/components/TabsNav.tsx
 import React from 'react';
 
-export type WorkbenchTab =
-  | 'lexer_playground'
-  | 'token_rules'
-  | 'automaton_designer'
-  | 'regex_lab'
-  | 'grammar_workbench'
-  | 'arden_solver'
-  | 'language_operations'
-  | 'pumping_lemma'
-  | 'equivalence_checker';
+export type WorkbenchTab = 'lexer_playground';
 
 interface TabsNavProps {
   activeTab: WorkbenchTab;
@@ -34,14 +25,6 @@ export const TabsNav: React.FC<TabsNavProps> = ({
       badge: tokenCount > 0 ? `${tokenCount} tokens` : undefined,
       badgeClass: 'badge-blue',
     },
-    { id: 'token_rules',         label: 'Token Rules',          icon: '☰' },
-    { id: 'automaton_designer',  label: 'Automaton Designer',   icon: '◉' },
-    { id: 'regex_lab',           label: 'RegEx Lab',            icon: '⌕' },
-    { id: 'grammar_workbench',   label: 'Grammar Workbench',    icon: '∠' },
-    { id: 'arden_solver',        label: "Arden's Solver",       icon: 'Σ' },
-    { id: 'language_operations', label: 'Language Ops',         icon: '⇄' },
-    { id: 'pumping_lemma',       label: 'Pumping Lemma',        icon: '◇' },
-    { id: 'equivalence_checker', label: 'Equivalence Checker',  icon: '≈' },
   ];
 
   return (
