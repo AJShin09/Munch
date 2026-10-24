@@ -1,5 +1,5 @@
 // src/components/Navbar.tsx
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { WorkbenchProject, TokenRule } from '../types';
 import { LANGUAGE_PRESETS } from '../defaultRules';
 
@@ -16,11 +16,39 @@ interface NavbarProps {
   onReset: () => void;
 }
 
+/** Minimal structural check so a hand-edited or truncated file cannot replace
+ *  the workbench state with something the lexer/UI cannot render. */
+export const isValidProject = (value: unknown): value is WorkbenchProject => {
+  if (!value || typeof value !== 'object') return false;
+  const project = value as Partial<WorkbenchProject>;
+  if (typeof project.sourceCode !== 'string') return false;
+  if (!Array.isArray(project.rules) || project.rules.length === 0) return false;
+  return project.rules.every(rule =>
+    !!rule &&
+    typeof rule === 'object' &&
+    typeof rule.name === 'string' &&
+    rule.name.length > 0 &&
+    typeof rule.regex === 'string' &&
+    typeof rule.priority === 'number' &&
+    Number.isFinite(rule.priority) &&
+    typeof rule.enabled === 'boolean'
+  );
+};
+
 export const Navbar: React.FC<NavbarProps> = ({
   projectName, setProjectName, currentPreset, onSelectPreset,
   sourceCode, rules, onLoadProject, theme, setTheme, onReset,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [status, setStatus] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+
+  // Non-blocking feedback instead of alert() (alert dialogs are unusable on
+  // small screens and interrupt typing). Auto-clears after a few seconds.
+  useEffect(() => {
+    if (!status) return;
+    const id = window.setTimeout(() => setStatus(null), 4000);
+    return () => window.clearTimeout(id);
+  }, [status]);
 
   const handleExport = () => {
     const project: WorkbenchProject = {
@@ -30,10 +58,15 @@ export const Navbar: React.FC<NavbarProps> = ({
     const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
+    const safeName = (projectName.trim() || 'munch-project')
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, '_')
+      .replace(/^_+|_+$/g, '') || 'munch-project';
     a.href = url;
-    a.download = `${projectName.toLowerCase().replace(/\s+/g, '_')}.json`;
+    a.download = `${safeName}.json`;
     a.click();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    setStatus({ kind: 'ok', text: `Saved ${safeName}.json` });
   };
 
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -42,23 +75,31 @@ export const Navbar: React.FC<NavbarProps> = ({
     const reader = new FileReader();
     reader.onload = ev => {
       try {
-        const project = JSON.parse(ev.target?.result as string) as WorkbenchProject;
-        if (project.rules && Array.isArray(project.rules)) onLoadProject(project);
-        else alert('Invalid project file: missing rules.');
-      } catch { alert('Failed to parse JSON project file.'); }
+        const parsed: unknown = JSON.parse(ev.target?.result as string);
+        if (isValidProject(parsed)) {
+          onLoadProject(parsed);
+          setStatus({ kind: 'ok', text: `Loaded ${file.name}` });
+        } else {
+          setStatus({ kind: 'error', text: 'Invalid project file: expected sourceCode and a non-empty rules array.' });
+        }
+      } catch {
+        setStatus({ kind: 'error', text: 'Failed to parse JSON project file.' });
+      }
     };
+    reader.onerror = () => setStatus({ kind: 'error', text: `Could not read ${file.name}.` });
     reader.readAsText(file);
     e.target.value = '';
   };
 
   return (
-    <header style={{
+    <header className="app-navbar" style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       flexWrap: 'wrap', gap: 10,
       padding: '8px 16px',
       background: 'var(--panel-bg)',
       borderBottom: '1px solid var(--border-color)',
       flexShrink: 0,
+      minWidth: 0,
     }}>
       {/* Brand + Project Name */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -97,10 +138,12 @@ export const Navbar: React.FC<NavbarProps> = ({
           <input
             type="text"
             value={projectName}
+            aria-label="Project name"
             onChange={e => setProjectName(e.target.value)}
             style={{
               background: 'transparent', border: 'none', outline: 'none',
               color: 'var(--text-main)', fontSize: 13, fontWeight: 500, width: 160,
+              minWidth: 0,
             }}
           />
         </div>
@@ -113,12 +156,16 @@ export const Navbar: React.FC<NavbarProps> = ({
           <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>Preset:</span>
           <select
             className="ctrl-select"
+            aria-label="Language preset"
             value={currentPreset}
             onChange={e => onSelectPreset(e.target.value)}
           >
             {Object.entries(LANGUAGE_PRESETS).map(([key, preset]) => (
               <option key={key} value={key}>{preset.name}</option>
             ))}
+            {currentPreset === '' && (
+              <option value="" disabled>Custom / imported</option>
+            )}
           </select>
         </div>
 
@@ -138,9 +185,28 @@ export const Navbar: React.FC<NavbarProps> = ({
           className="btn-icon"
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
           title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
         >
           {theme === 'dark' ? '☀' : '☾'}
         </button>
+
+        {status && (
+          <span
+            role="status"
+            aria-live="polite"
+            style={{
+              fontSize: 11,
+              fontFamily: 'var(--font-mono)',
+              color: status.kind === 'ok' ? 'var(--emerald)' : 'var(--ruby)',
+              maxWidth: '100%',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {status.kind === 'ok' ? '✓ ' : '✕ '}{status.text}
+          </span>
+        )}
       </div>
     </header>
   );

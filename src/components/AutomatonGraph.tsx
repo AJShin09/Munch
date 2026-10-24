@@ -26,6 +26,10 @@ export const AutomatonGraph: React.FC<Props> = ({
   const [svgSize, setSvgSize] = useState({ w: 600, h: 280 });
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  /** Set once the user pans/zooms/drags, so a container resize does not yank
+   *  the viewport back to the fitted position under their fingers. */
+  const userMoved = useRef(false);
+  const fitted = useRef<{ id: string; w: number; h: number } | null>(null);
 
   const activeSet = new Set(Array.isArray(activeStates) ? activeStates : Array.from(activeStates));
   const acceptingSet = new Set(automaton?.acceptingStates ?? []);
@@ -44,11 +48,32 @@ export const AutomatonGraph: React.FC<Props> = ({
     return () => ro.disconnect();
   }, []);
 
-  // Place nodes whenever the automaton changes
+  /** Scale + centre the automaton inside the available canvas. The layout is
+   *  authored in a fixed 640×360 space, so without this a phone-sized panel
+   *  shows only the left half of the graph. */
+  const fitToView = useCallback((pos: Record<string, Pos>, w: number, h: number) => {
+    const points = Object.values(pos);
+    if (points.length === 0) return;
+    // Extra room on the left for the start-state arrow and label.
+    const minX = Math.min(...points.map(p => p.x)) - 78;
+    const maxX = Math.max(...points.map(p => p.x)) + 30;
+    const minY = Math.min(...points.map(p => p.y)) - 30;
+    const maxY = Math.max(...points.map(p => p.y)) + 30;
+    const bw = Math.max(1, maxX - minX);
+    const bh = Math.max(1, maxY - minY);
+    const z = Math.max(0.3, Math.min(1.4, Math.min(w / bw, h / bh)));
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    setZoom(z);
+    setPan({ x: w / 2 - cx * z, y: h / 2 - cy * z });
+  }, []);
+
+  // Place nodes and fit the view whenever the automaton changes. A size change
+  // re-fits only while the user has not taken over the viewport.
   useEffect(() => {
-    if (!automaton) return;
-    if (automaton.layout && Object.keys(automaton.layout).length > 0) {
-      setPositions({ ...automaton.layout });
+    if (!automaton) {
+      setPositions({});
+      fitted.current = null;
       return;
     }
     const states = automaton.states;
@@ -56,19 +81,45 @@ export const AutomatonGraph: React.FC<Props> = ({
     const cx = svgSize.w / 2;
     const cy = svgSize.h / 2;
     const r = Math.min(cx - 60, cy - 50, 40 * n, 200);
-    const pos: Record<string, Pos> = {};
-
-    states.forEach((s, i) => {
-      if (s === automaton.startState && n > 2) {
-        pos[s] = { x: 80, y: svgSize.h / 2 };
-      } else {
-        const angle = (2 * Math.PI * i) / n - Math.PI / 2;
-        pos[s] = { x: Math.round(cx + r * Math.cos(angle)), y: Math.round(cy + r * 0.75 * Math.sin(angle)) };
-      }
-    });
+    let pos: Record<string, Pos>;
+    if (automaton.layout && Object.keys(automaton.layout).length > 0) {
+      pos = { ...automaton.layout };
+    } else {
+      pos = {};
+      states.forEach((s, i) => {
+        if (s === automaton.startState && n > 2) {
+          pos[s] = { x: 80, y: svgSize.h / 2 };
+        } else {
+          const angle = (2 * Math.PI * i) / n - Math.PI / 2;
+          pos[s] = { x: Math.round(cx + r * Math.cos(angle)), y: Math.round(cy + r * 0.75 * Math.sin(angle)) };
+        }
+      });
+    }
     setPositions(pos);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [automaton?.id, svgSize]);
+
+    const last = fitted.current;
+    const automatonChanged = !last || last.id !== automaton.id;
+    const sizeChanged = !last || Math.abs(last.w - svgSize.w) > 2 || Math.abs(last.h - svgSize.h) > 2;
+    if (automatonChanged) userMoved.current = false;
+    if (automatonChanged || (!userMoved.current && sizeChanged)) {
+      fitted.current = { id: automaton.id, w: svgSize.w, h: svgSize.h };
+      fitToView(pos, svgSize.w, svgSize.h);
+    }
+  }, [automaton?.id, svgSize.w, svgSize.h, fitToView]);
+
+  // Wheel zoom must be a non-passive listener: React registers wheel handlers
+  // passively, so `preventDefault()` there is ignored and the page scrolls.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      userMoved.current = true;
+      setZoom(z => Math.max(0.3, Math.min(3, z - e.deltaY * 0.001)));
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, []);
 
   const toSvgCoords = useCallback((clientX: number, clientY: number): Pos => {
     if (!svgRef.current) return { x: 0, y: 0 };
@@ -79,23 +130,31 @@ export const AutomatonGraph: React.FC<Props> = ({
     };
   }, [pan, zoom]);
 
-  const onNodeMouseDown = (e: React.MouseEvent, state: string) => {
-    e.stopPropagation();
-    if (!interactive) return;
-    const svgPos = toSvgCoords(e.clientX, e.clientY);
-    const nodePos = positions[state] ?? { x: 100, y: 100 };
-    setDragging(state);
-    setDragOffset({ x: svgPos.x - nodePos.x, y: svgPos.y - nodePos.y });
-    onSelectState?.(state);
+  // Pointer events cover mouse, pen and touch. A press that starts on a node
+  // drags it; anywhere else pans the canvas.
+  const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const nodeEl = (e.target as Element).closest?.('[data-node-state]');
+    const state = nodeEl?.getAttribute('data-node-state') ?? null;
+    userMoved.current = true;
+    if (state && interactive) {
+      const svgPos = toSvgCoords(e.clientX, e.clientY);
+      const nodePos = positions[state] ?? { x: 100, y: 100 };
+      setDragging(state);
+      setDragOffset({ x: svgPos.x - nodePos.x, y: svgPos.y - nodePos.y });
+      onSelectState?.(state);
+    } else {
+      setIsPanning(true);
+      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+    }
+    try {
+      svgRef.current?.setPointerCapture(e.pointerId);
+    } catch {
+      // Pointer capture is best-effort (synthetic events / stale pointer ids).
+    }
   };
 
-  const onSvgMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0 || dragging) return;
-    setIsPanning(true);
-    setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
-  };
-
-  const onMouseMove = (e: React.MouseEvent) => {
+  const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
     if (dragging) {
       const svgPos = toSvgCoords(e.clientX, e.clientY);
       setPositions(prev => ({
@@ -107,16 +166,21 @@ export const AutomatonGraph: React.FC<Props> = ({
     }
   };
 
-  const onMouseUp = () => { setDragging(null); setIsPanning(false); };
-
-  const onWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    setZoom(z => Math.max(0.3, Math.min(3, z - e.deltaY * 0.001)));
+  const onPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
+    setDragging(null);
+    setIsPanning(false);
+    try {
+      if (svgRef.current?.hasPointerCapture(e.pointerId)) {
+        svgRef.current.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // ignore capture release failures
+    }
   };
 
   if (!automaton || automaton.states.length === 0) {
     return (
-      <div ref={containerRef} style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-primary)', color: 'var(--text-dim)', fontSize: 13 }}>
+      <div ref={containerRef} style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-primary)', color: 'var(--text-dim)', fontSize: 13, padding: 16, textAlign: 'center' }}>
         No automaton — select a token rule or compile a regex.
       </div>
     );
@@ -135,18 +199,24 @@ export const AutomatonGraph: React.FC<Props> = ({
   const NODE_R = 22;
 
   return (
-    <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative', background: '#070b12', overflow: 'hidden' }}>
+    <div ref={containerRef} className="automaton-graph" style={{ width: '100%', height: '100%', position: 'relative', background: '#070b12', overflow: 'hidden' }}>
       {/* Zoom controls */}
       <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', flexDirection: 'column', gap: 4, zIndex: 10 }}>
         {[['＋', 0.2], ['−', -0.2]].map(([label, delta]) => (
-          <button key={String(label)} className="btn-icon"
-            onClick={() => setZoom(z => Math.max(0.3, Math.min(3, z + Number(delta))))}
+          <button key={String(label)} className="btn-icon ag-zoom"
+            aria-label={Number(delta) > 0 ? 'Zoom in' : 'Zoom out'}
+            onClick={() => { userMoved.current = true; setZoom(z => Math.max(0.3, Math.min(3, z + Number(delta)))); }}
             style={{ width: 28, height: 28, fontSize: 14, padding: 0 }}>
             {label}
           </button>
         ))}
-        <button className="btn-icon" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}
-          style={{ width: 28, height: 28, fontSize: 12, padding: 0 }} title="Reset view">
+        <button className="btn-icon ag-zoom"
+          onClick={() => {
+            userMoved.current = false;
+            fitted.current = { id: automaton.id, w: svgSize.w, h: svgSize.h };
+            fitToView(positions, svgSize.w, svgSize.h);
+          }}
+          style={{ width: 28, height: 28, fontSize: 12, padding: 0 }} title="Fit automaton to view" aria-label="Fit automaton to view">
           ⟲
         </button>
       </div>
@@ -154,11 +224,11 @@ export const AutomatonGraph: React.FC<Props> = ({
       <svg
         ref={svgRef}
         width="100%" height="100%"
-        style={{ cursor: isPanning ? 'grabbing' : 'grab', userSelect: 'none' }}
-        onMouseDown={onSvgMouseDown}
-        onMouseMove={onMouseMove}
-        onMouseUp={onMouseUp}
-        onWheel={onWheel}
+        style={{ cursor: isPanning ? 'grabbing' : dragging ? 'move' : 'grab', userSelect: 'none', touchAction: 'none' }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
       >
         <defs>
           <marker id="ag-arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -257,8 +327,8 @@ export const AutomatonGraph: React.FC<Props> = ({
 
             return (
               <g key={state} transform={`translate(${pos.x},${pos.y})`}
-                style={{ cursor: interactive ? 'move' : 'default' }}
-                onMouseDown={e => onNodeMouseDown(e, state)}>
+                data-node-state={state}
+                style={{ cursor: interactive ? 'move' : 'default', touchAction: 'none' }}>
 
                 {/* Active glow ring */}
                 {isActive && (

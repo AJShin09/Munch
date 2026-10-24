@@ -183,22 +183,27 @@ export class SteppedLexer {
 
         pos = afterPos;
       } else {
-        // No rule matched: Emit UNKNOWN token & register diagnostic
+        // No rule matched: Emit UNKNOWN token & register diagnostic.
+        // Advance by the full code point so an astral character (e.g. an emoji,
+        // which is two UTF-16 code units) is reported once instead of twice.
+        const codePoint = source.codePointAt(pos) ?? 0;
+        const charLength = codePoint > 0xffff ? 2 : 1;
+        const charText = source.slice(pos, pos + charLength);
         const startPos = currentPos;
-        const endPos = offsetToSourcePos(positions, pos + 1);
+        const endPos = offsetToSourcePos(positions, pos + charLength);
 
-        const isQuote = currentChar === '"' || currentChar === "'" || currentChar === '`';
+        const isQuote = charText === '"' || charText === "'" || charText === '`';
         const diag: Diagnostic = isQuote
           ? {
               severity: 'error',
-              message: `Unterminated string literal: "${currentChar}" has no closing quote before the end of the line.`,
+              message: `Unterminated string literal: "${charText}" has no closing quote before the end of the file.`,
               pos: startPos,
               endPos,
               code: 'LEX_UNTERMINATED_STRING',
             }
           : {
               severity: 'error',
-              message: `Unrecognized character '${currentChar}' (code ${currentChar.charCodeAt(0)}) has no matching rule.`,
+              message: `Unrecognized character '${charText}' (code ${charText.charCodeAt(0)}) has no matching rule.`,
               pos: startPos,
               endPos,
               code: 'LEX_UNRECOGNIZED_CHAR',
@@ -208,7 +213,7 @@ export class SteppedLexer {
 
         const unknownToken: Token = {
           type: 'UNKNOWN',
-          lexeme: currentChar,
+          lexeme: charText,
           start: startPos,
           end: endPos,
           ruleName: undefined,
@@ -219,14 +224,14 @@ export class SteppedLexer {
         traceSteps.push({
           stepIndex: stepIndex++,
           pos,
-          char: currentChar,
+          char: charText,
           activeCandidateRules: [],
           action: 'EMIT_UNKNOWN',
           tokenEmitted: unknownToken,
-          explanation: `At offset ${pos} (L${startPos.line + 1}:C${startPos.column + 1}): No rule matched character '${currentChar}'. Emitted UNKNOWN token and advanced 1 character.`,
+          explanation: `At offset ${pos} (L${startPos.line + 1}:C${startPos.column + 1}): No rule matched character '${charText}'. Emitted UNKNOWN token and advanced ${charLength} character${charLength === 2 ? 's' : ''}.`,
         });
 
-        pos += 1;
+        pos += charLength;
       }
     }
 

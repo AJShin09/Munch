@@ -13,6 +13,9 @@ interface LexerPlaygroundProps {
   sourceCode: string;
   setSourceCode: (src: string) => void;
   rules: TokenRule[];
+  /** Incremented by the navbar Reset button; restores the trace to step 1 even
+   *  when the restored source is identical to the current source. */
+  resetSignal?: number;
 }
 
 function displayChar(ch: string | undefined): string {
@@ -80,7 +83,7 @@ function useVerticalSplit(
 }
 
 export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
-  sourceCode, setSourceCode, rules,
+  sourceCode, setSourceCode, rules, resetSignal = 0,
 }) => {
   const analysis = useMemo<LexerAnalysisResult>(
     () => new SteppedLexer(rules).analyze(sourceCode),
@@ -96,6 +99,7 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
 
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
   const highlightRef = useRef<HTMLPreElement | null>(null);
+  const lineNumsRef = useRef<HTMLDivElement | null>(null);
   const playTimerRef = useRef<number | null>(null);
   const leftColRef = useRef<HTMLDivElement | null>(null);
   const rightColRef = useRef<HTMLDivElement | null>(null);
@@ -125,12 +129,27 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
     setPrevAnalysis(analysis);
     setCurrentStepIdx(0);
     setSelectedTokenIdx(null);
+    setIsPlaying(false);
+  }
+
+  // Explicit navbar Reset with an unchanged source still restores step 1.
+  const [prevResetSignal, setPrevResetSignal] = useState(resetSignal);
+  if (resetSignal !== prevResetSignal) {
+    setPrevResetSignal(resetSignal);
+    setCurrentStepIdx(0);
+    setSelectedTokenIdx(null);
+    setIsPlaying(false);
+    setDfaCharIdx(0);
+    setDfaPlaying(false);
   }
 
   // Animation loop
   useEffect(() => {
     if (isPlaying) {
       playTimerRef.current = window.setInterval(() => {
+        // Stepping the trace releases any card-level selection so the DFA panel
+        // always shows the token emitted by the step that is now current.
+        setSelectedTokenIdx(null);
         setCurrentStepIdx(curr => {
           if (curr + 1 < analysis.traceSteps.length) return curr + 1;
           setIsPlaying(false);
@@ -191,20 +210,52 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
     [dfaSteps, dfaCharIdx]
   );
 
+  // Focusing the editor on a coarse pointer (touch) pops the on-screen keyboard,
+  // which covers the panel the user just tapped. Set the selection range either
+  // way, but only steal focus on pointer devices that have a real keyboard.
+  const focusEditor = () => {
+    const coarse = typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && window.matchMedia('(pointer: coarse)').matches;
+    if (!coarse) editorRef.current?.focus({ preventScroll: true });
+  };
+
   const selectToken = (idx: number) => {
-    setSelectedTokenIdx(idx);
     const tok = analysis.tokens[idx];
+    if (!tok) return;
+    setSelectedTokenIdx(idx);
     setDfaCharIdx(0);
-    if (editorRef.current) {
-      editorRef.current.focus();
-      editorRef.current.setSelectionRange(tok.start.offset, tok.end.offset);
-    }
+    // Keep the execution trace on the step that emitted this token, so the
+    // highlighted row, the DFA input and the token card all agree.
+    const stepIdx = analysis.traceSteps.findIndex(s => s.tokenEmitted === tok);
+    if (stepIdx >= 0) setCurrentStepIdx(stepIdx);
+    focusEditor();
+    editorRef.current?.setSelectionRange(tok.start.offset, tok.end.offset);
   };
 
   const navigateToOffset = (startOffset: number, endOffset?: number) => {
-    if (editorRef.current) {
-      editorRef.current.focus();
-      editorRef.current.setSelectionRange(startOffset, endOffset ?? startOffset);
+    focusEditor();
+    editorRef.current?.setSelectionRange(startOffset, endOffset ?? startOffset);
+  };
+
+  // Moving through the trace clears any explicit card selection so the panel
+  // follows the step's emitted token instead of a stale selection.
+  const goToStep = (idx: number) => {
+    const max = Math.max(0, analysis.traceSteps.length - 1);
+    setCurrentStepIdx(Math.max(0, Math.min(max, idx)));
+    setSelectedTokenIdx(null);
+    setIsPlaying(false);
+  };
+
+  const step = (delta: number) => goToStep(currentStepIdx + delta);
+  const jumpToNextToken = () => {
+    for (let i = currentStepIdx + 1; i < analysis.traceSteps.length; i++) {
+      if (analysis.traceSteps[i].action === 'EMIT_TOKEN') { goToStep(i); return; }
+    }
+  };
+  const jumpToNextError = () => {
+    for (let i = currentStepIdx + 1; i < analysis.traceSteps.length; i++) {
+      if (analysis.traceSteps[i].action === 'EMIT_UNKNOWN') { goToStep(i); return; }
     }
   };
 
@@ -220,24 +271,16 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
   const syncHighlightScroll = () => {
     const ta = editorRef.current;
     const pre = highlightRef.current;
+    const nums = lineNumsRef.current;
     if (ta && pre) {
       pre.scrollTop = ta.scrollTop;
       pre.scrollLeft = ta.scrollLeft;
     }
+    // The gutter is a separate element, so it has to be scrolled manually or it
+    // stops matching the code once the source is longer than the panel.
+    if (ta && nums) nums.scrollTop = ta.scrollTop;
   };
   useEffect(syncHighlightScroll, [sourceCode, syntaxSegments]);
-
-  const step = (delta: number) => setCurrentStepIdx(i => Math.max(0, Math.min(analysis.traceSteps.length - 1, i + delta)));
-  const jumpToNextToken = () => {
-    for (let i = currentStepIdx + 1; i < analysis.traceSteps.length; i++) {
-      if (analysis.traceSteps[i].action === 'EMIT_TOKEN') { setCurrentStepIdx(i); return; }
-    }
-  };
-  const jumpToNextError = () => {
-    for (let i = currentStepIdx + 1; i < analysis.traceSteps.length; i++) {
-      if (analysis.traceSteps[i].action === 'EMIT_UNKNOWN') { setCurrentStepIdx(i); return; }
-    }
-  };
 
   // DFA panel derived data — all fields come from the one canonical model.
   const lexemeChars = dfaModel.chars;
@@ -298,13 +341,11 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
     return () => window.clearTimeout(id);
   }, [dfaPlaying, dfaCharIdx, lexemeChars.length]);
 
-  const H = 'calc(100vh - 95px)';
-
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', height: H, overflow: 'hidden', background: 'var(--bg-primary)' }}>
+    <div className="lexer-playground-grid" style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', height: '100%', overflow: 'hidden', background: 'var(--bg-primary)', minWidth: 0 }}>
 
       {/* ── LEFT: Editor + Token Stream ── */}
-      <div ref={leftColRef} style={{ display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border-color)', overflow: 'hidden' }}>
+      <div ref={leftColRef} style={{ display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border-color)', overflow: 'hidden', minWidth: 0 }}>
 
         {/* Controls header */}
         <div className="panel-header" style={{ flexWrap: 'wrap', gap: 6 }}>
@@ -321,7 +362,7 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
             <button className="btn-icon" onClick={() => step(1)} disabled={currentStepIdx >= analysis.traceSteps.length - 1} title="Step forward">▶|</button>
             <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: 12 }} onClick={jumpToNextToken}>» Token</button>
             <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: 12 }} onClick={jumpToNextError}>⚠ Error</button>
-            <button className="btn-icon" onClick={() => { setIsPlaying(false); setCurrentStepIdx(0); }} title="Reset">⟲</button>
+            <button className="btn-icon" onClick={() => { setIsPlaying(false); setCurrentStepIdx(0); setSelectedTokenIdx(null); }} title="Reset to the first step" aria-label="Reset to the first step">⟲</button>
             <button className="btn-icon"
               onClick={() => editorSplit.setCollapsed(c => !c)}
               title={editorCollapsed ? 'Expand source editor' : 'Minimize source editor'}>
@@ -337,7 +378,7 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
           borderBottom: '1px solid var(--border-color)', flexShrink: 0,
         }}>
           <span style={{ fontSize: 12, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-            Step {currentStepIdx + 1} / {Math.max(1, analysis.traceSteps.length)}
+            Step {analysis.traceSteps.length === 0 ? 0 : currentStepIdx + 1} / {analysis.traceSteps.length}
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--text-dim)' }}>
             <span>Speed: {playSpeed}ms</span>
@@ -351,7 +392,7 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
         {/* Source Editor (resizable, collapsible) */}
         {!editorCollapsed && (
           <div className="source-editor-wrap" style={{ flex: '0 0 auto', height: editorHeight, minHeight: 0, overflow: 'hidden' }}>
-            <div className="source-line-nums">
+            <div className="source-line-nums" ref={lineNumsRef} aria-hidden="true">
               {sourceCode.split('\n').map((_, i) => <div key={i}>{i + 1}</div>)}
             </div>
             <div className="source-code-area">
@@ -364,6 +405,7 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
               <textarea
                 ref={editorRef}
                 className="source-textarea"
+                aria-label="Source code"
                 value={sourceCode}
                 onChange={e => setSourceCode(e.target.value)}
                 onScroll={syncHighlightScroll}
@@ -389,7 +431,7 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
         )}
 
         {/* Token Stream */}
-        <div style={{
+        <div className="lp-tokens" style={{
           display: 'flex', flexDirection: 'column',
           borderTop: '1px solid var(--border-color)',
           background: 'var(--bg-secondary)', flex: '1 1 auto',
@@ -434,11 +476,11 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
       </div>
 
       {/* ── RIGHT: Automaton + Trace ── */}
-      <div ref={rightColRef} style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div ref={rightColRef} style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
 
         {/* Automaton panel (resizable, collapsible) */}
         {!dfaCollapsed && (
-        <div style={{ flex: '0 0 auto', height: dfaHeight, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+        <div className="lp-dfa" style={{ flex: '0 0 auto', height: dfaHeight, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
           <div className="panel-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
               <span className="panel-label">Token Recognizer DFA</span>
@@ -454,7 +496,7 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
               ▾
             </button>
           </div>
-          <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+          <div className="lp-dfa-graph" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
             <AutomatonGraph automaton={tokenAutomaton} activeStates={dfaModel.activeStates} activeTransition={activeTransition} interactive />
             {selectedToken && !tokenAutomaton && (
               <div style={{
@@ -468,7 +510,7 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
             )}
           </div>
           {selectedToken && (
-            <div style={{
+            <div className="lp-dfa-footer" style={{
               padding: '6px 14px', background: 'var(--bg-card)',
               borderTop: '1px solid var(--border-color)',
               display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0,
@@ -597,9 +639,9 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
         )}
 
         {/* Execution Trace / Diagnostics */}
-        <div style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+        <div className="lp-trace" style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
           {/* Sub-tabs */}
-          <div style={{ display: 'flex', background: 'var(--panel-bg)', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
+          <div className="trace-tabs">
             <button className={`tab-button${activePanel === 'trace' ? ' active' : ''}`}
               onClick={() => setActivePanel('trace')} style={{ fontSize: 12 }}>
               ▤ Execution Trace
@@ -650,7 +692,7 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
                     {analysis.traceSteps.map((step, idx) => {
                         const p = offsetToSourcePos(posIndex, step.pos);
                       return (
-                        <tr key={idx} className={currentStepIdx === idx ? 'current' : ''} onClick={() => setCurrentStepIdx(idx)}>
+                        <tr key={idx} className={currentStepIdx === idx ? 'current' : ''} onClick={() => goToStep(idx)}>
                           <td style={{ color: 'var(--text-dim)' }}>{step.stepIndex}</td>
                           <td style={{ color: 'var(--sapphire)' }}>{step.pos}</td>
                           <td style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{p.line + 1}:{p.column + 1}</td>

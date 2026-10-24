@@ -70,17 +70,20 @@ export class Lexer {
         continue;
       }
 
-      // No rule matched – emit UNKNOWN token for a single character
+      // No rule matched – emit an UNKNOWN token for one full code point, so an
+      // astral character (two UTF-16 code units) is not split in half.
+      const codePoint = source.codePointAt(pos) ?? 0;
+      const charLength = codePoint > 0xffff ? 2 : 1;
       const startPos = offsetToSourcePos(positions, pos);
-      const endPos = offsetToSourcePos(positions, pos + 1);
+      const endPos = offsetToSourcePos(positions, pos + charLength);
       tokens.push({
         type: 'UNKNOWN',
-        lexeme: source[pos],
+        lexeme: source.slice(pos, pos + charLength),
         start: startPos,
         end: endPos,
         ruleName: undefined,
       });
-      pos += 1;
+      pos += charLength;
     }
 
     return tokens;

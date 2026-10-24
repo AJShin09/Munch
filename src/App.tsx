@@ -3,12 +3,10 @@ import React, { useState, useEffect } from 'react';
 import { TokenRule, WorkbenchProject } from './types';
 import { LANGUAGE_PRESETS } from './defaultRules';
 import { Navbar } from './components/Navbar';
-import { TabsNav, WorkbenchTab } from './components/TabsNav';
 import { LexerPlayground } from './components/LexerPlayground';
 
 export const App: React.FC = () => {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const [activeTab, setActiveTab] = useState<WorkbenchTab>('lexer_playground');
 
   const [currentPreset, setCurrentPreset] = useState<string>('javascript');
   const [projectName, setProjectName] = useState<string>('JavaScript Lexer Demo');
@@ -18,6 +16,7 @@ export const App: React.FC = () => {
   const [rules, setRules] = useState<TokenRule[]>(
     LANGUAGE_PRESETS.javascript.rules
   );
+  const [resetSignal, setResetSignal] = useState(0);
 
   // Sync theme with body class + <html data-theme="...">
   useEffect(() => {
@@ -45,14 +44,23 @@ export const App: React.FC = () => {
     setProjectName(project.name || 'Loaded Project');
     setSourceCode(project.sourceCode || '');
     setRules(project.rules || []);
+    // The loaded rules may not match any preset; clear the selector so picking
+    // the previously shown preset still fires a change event.
+    setCurrentPreset('');
   };
 
   const handleReset = () => {
-    handleSelectPreset(currentPreset);
+    handleSelectPreset(
+      (LANGUAGE_PRESETS as Record<string, unknown>)[currentPreset]
+        ? currentPreset
+        : 'javascript'
+    );
+    // Also reset the trace/selection when the restored source is unchanged.
+    setResetSignal(n => n + 1);
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', width: '100%', overflow: 'hidden' }}>
       {/* Top Navbar */}
       <Navbar
         projectName={projectName}
@@ -67,18 +75,13 @@ export const App: React.FC = () => {
         onReset={handleReset}
       />
 
-      {/* Main Tools Tab Navigation */}
-      <TabsNav
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-      />
-
       {/* Main Workbench Viewport */}
-      <main style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      <main className="app-main" style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <LexerPlayground
           sourceCode={sourceCode}
           setSourceCode={setSourceCode}
           rules={rules}
+          resetSignal={resetSignal}
         />
       </main>
     </div>
