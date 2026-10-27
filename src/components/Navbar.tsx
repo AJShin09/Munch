@@ -14,6 +14,8 @@ interface NavbarProps {
   theme: 'dark' | 'light';
   setTheme: (theme: 'dark' | 'light') => void;
   onReset: () => void;
+  rulesOpen: boolean;
+  onToggleRules: () => void;
 }
 
 /** Minimal structural check so a hand-edited or truncated file cannot replace
@@ -38,6 +40,7 @@ export const isValidProject = (value: unknown): value is WorkbenchProject => {
 export const Navbar: React.FC<NavbarProps> = ({
   projectName, setProjectName, currentPreset, onSelectPreset,
   sourceCode, rules, onLoadProject, theme, setTheme, onReset,
+  rulesOpen, onToggleRules,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [status, setStatus] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
@@ -151,6 +154,19 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            className={`btn ${rulesOpen ? 'btn-primary' : 'btn-outline'}`}
+            style={{ padding: '5px 12px', fontSize: 12 }}
+            onClick={onToggleRules}
+            aria-expanded={rulesOpen}
+            aria-controls="rule-drawer"
+            title="Show the rule set the scanner is using, and the languages it cannot express"
+          >
+            ⚙ Rules
+          </button>
+        </div>
+
         {/* Language preset */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>Preset:</span>

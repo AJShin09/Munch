@@ -100,7 +100,11 @@ export class RegexParser {
     if (this.input.length === 0) {
       return { type: 'EPSILON' };
     }
-    return this.parseUnion();
+    const expression = this.parseUnion();
+    if (this.peek() !== null) {
+      throw new Error(`Unexpected '${this.peek()}' at position ${this.pos + 1}.`);
+    }
+    return expression;
   }
 
   // Union: Expr ('|' Expr)*
@@ -261,6 +265,7 @@ export class RegexParser {
     }
 
     if (c === '(') {
+      const groupStart = this.pos;
       this.next(); // consume '('
       if (this.peek() === '?') {
         this.next(); // consume '?'
@@ -280,10 +285,15 @@ export class RegexParser {
         }
       }
       const node = this.parseUnion();
-      if (this.peek() === ')') {
-        this.next();
+      if (this.peek() !== ')') {
+        throw new Error(`Unclosed group starting at position ${groupStart + 1}.`);
       }
+      this.next();
       return node;
+    }
+
+    if (c === '*' || c === '+' || c === '?') {
+      throw new Error(`Unexpected quantifier '${c}' at position ${this.pos + 1}.`);
     }
 
     if (c === '[') {
@@ -364,9 +374,10 @@ export class RegexParser {
 
     const rawLabel = this.input.slice(contentStart, this.pos);
 
-    if (this.peek() === ']') {
-      this.next(); // consume ']'
+    if (this.peek() !== ']') {
+      throw new Error(`Unclosed character class starting at position ${contentStart}.`);
     }
+    this.next(); // consume ']'
 
     if (elements.length === 0) {
       // Empty class [] matches nothing
@@ -429,7 +440,18 @@ export class ThompsonBuilder {
 
   public buildFromAST(node: RegexNode): Fragment {
     switch (node.type) {
-      case 'EMPTY':
+      case 'EMPTY': {
+        const s = this.newState();
+        const a = this.newState();
+        return {
+          start: s,
+          accept: a,
+          states: [s, a],
+          transitions: [],
+          alphabet: new Set(),
+        };
+      }
+
       case 'EPSILON': {
         const s = this.newState();
         const a = this.newState();

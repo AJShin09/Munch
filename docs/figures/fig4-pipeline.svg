@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="250" viewBox="0 0 1000 250">
+<defs>
+  <marker id="ah" viewBox="0 0 10 10" refX="9.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#33506e"/>
+  </marker>
+</defs>
+<rect width="1000" height="250" fill="#ffffff"/>
+<rect x="20" y="70" width="150" height="74" rx="6" fill="#f5f8fb" stroke="#33506e" stroke-width="1.8"/>
+<text x="95" y="102" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="17" text-anchor="middle" fill="#16232f" font-weight="normal">Regular</text>
+<text x="95" y="125" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="17" text-anchor="middle" fill="#16232f" font-weight="normal">expression</text>
+<rect x="215" y="70" width="150" height="74" rx="6" fill="#f5f8fb" stroke="#33506e" stroke-width="1.8"/>
+<text x="290" y="102" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="17" text-anchor="middle" fill="#16232f" font-weight="normal">Syntax</text>
+<text x="290" y="125" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="17" text-anchor="middle" fill="#16232f" font-weight="normal">tree</text>
+<rect x="410" y="70" width="150" height="74" rx="6" fill="#f5f8fb" stroke="#33506e" stroke-width="1.8"/>
+<text x="485" y="102" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="17" text-anchor="middle" fill="#16232f" font-weight="normal">NFA with</text>
+<text x="485" y="125" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="17" text-anchor="middle" fill="#16232f" font-weight="normal">ε-moves</text>
+<rect x="605" y="70" width="150" height="74" rx="6" fill="#f5f8fb" stroke="#33506e" stroke-width="1.8"/>
+<text x="680" y="102" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="17" text-anchor="middle" fill="#16232f" font-weight="normal">Deterministic</text>
+<text x="680" y="125" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="17" text-anchor="middle" fill="#16232f" font-weight="normal">automaton</text>
+<rect x="800" y="70" width="150" height="74" rx="6" fill="#f5f8fb" stroke="#33506e" stroke-width="1.8"/>
+<text x="875" y="102" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="17" text-anchor="middle" fill="#16232f" font-weight="normal">Minimal</text>
+<text x="875" y="125" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="17" text-anchor="middle" fill="#16232f" font-weight="normal">automaton</text>
+<line x1="173" y1="107" x2="212" y2="107" stroke="#33506e" stroke-width="2" marker-end="url(#ah)"/>
+<text x="192.5" y="182" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#5b6b7c" font-weight="normal">parse</text>
+<line x1="368" y1="107" x2="407" y2="107" stroke="#33506e" stroke-width="2" marker-end="url(#ah)"/>
+<text x="387.5" y="182" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#5b6b7c" font-weight="normal">Thompson</text>
+<line x1="563" y1="107" x2="602" y2="107" stroke="#33506e" stroke-width="2" marker-end="url(#ah)"/>
+<text x="582.5" y="182" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#5b6b7c" font-weight="normal">subset</text>
+<line x1="758" y1="107" x2="797" y2="107" stroke="#33506e" stroke-width="2" marker-end="url(#ah)"/>
+<text x="777.5" y="182" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#5b6b7c" font-weight="normal">minimize</text>
+</svg>

@@ -163,9 +163,27 @@ export interface PumpingLemmaLanguage {
     y: string,
     z: string,
     i: number
-  ) => { pumpedString: string; inLanguage: boolean; contradictionExplanation: string };
+  ) => {
+    valid: boolean;
+    error?: string;
+    pumpedString: string;
+    inLanguage: boolean;
+    contradictionExplanation: string;
+    proofExponent?: number;
+    proofPumpedString?: string;
+  };
   proofWalkthrough: string[];
 }
+
+export type WorkbenchId =
+  | 'lexer'
+  | 'regex'
+  | 'grammar'
+  | 'automaton'
+  | 'arden'
+  | 'operations'
+  | 'pumping'
+  | 'equivalence';
 
 /** Project file structure for Save/Load/Export */
 export interface WorkbenchProject {

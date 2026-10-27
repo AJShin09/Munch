@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="320" viewBox="0 0 1000 320">
+<defs>
+  <marker id="ah" viewBox="0 0 10 10" refX="9.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#33506e"/>
+  </marker>
+</defs>
+<rect width="1000" height="320" fill="#ffffff"/>
+<rect x="110" y="34" width="780" height="48" fill="#f5f8fb" stroke="#b9c7d6" stroke-width="1.4" rx="4"/>
+<rect x="110" y="34" width="6" height="48" fill="#2e5a88" rx="2"/>
+<text x="136" y="65" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="19" text-anchor="start" fill="#16232f" font-weight="600">Views</text>
+<text x="320" y="65" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="17" text-anchor="start" fill="#5b6b7c" font-weight="normal">workbench, construction view, rule drawer</text>
+<rect x="110" y="96" width="780" height="48" fill="#f5f8fb" stroke="#b9c7d6" stroke-width="1.4" rx="4"/>
+<rect x="110" y="96" width="6" height="48" fill="#2e5a88" rx="2"/>
+<text x="136" y="127" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="19" text-anchor="start" fill="#16232f" font-weight="600">Domain engines</text>
+<text x="320" y="127" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="17" text-anchor="start" fill="#5b6b7c" font-weight="normal">regex, automata, grammars, Arden, closure, pumping</text>
+<rect x="110" y="158" width="780" height="48" fill="#f5f8fb" stroke="#b9c7d6" stroke-width="1.4" rx="4"/>
+<rect x="110" y="158" width="6" height="48" fill="#2e5a88" rx="2"/>
+<text x="136" y="189" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="19" text-anchor="start" fill="#16232f" font-weight="600">Lexical analyzer</text>
+<text x="320" y="189" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="17" text-anchor="start" fill="#5b6b7c" font-weight="normal">rule compilation, longest match, trace, diagnostics</text>
+<rect x="110" y="220" width="780" height="48" fill="#f5f8fb" stroke="#b9c7d6" stroke-width="1.4" rx="4"/>
+<rect x="110" y="220" width="6" height="48" fill="#2e5a88" rx="2"/>
+<text x="136" y="251" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="19" text-anchor="start" fill="#16232f" font-weight="600">Shared model</text>
+<text x="320" y="251" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="17" text-anchor="start" fill="#5b6b7c" font-weight="normal">automata, grammars, tokens, rules, projects</text>
+<text x="500" y="300" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#5b6b7c" font-weight="normal">browser only — no server, no database, no network after load</text>
+</svg>

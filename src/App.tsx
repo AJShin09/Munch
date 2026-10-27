@@ -4,7 +4,14 @@ import { TokenRule, WorkbenchProject } from './types';
 import { LANGUAGE_PRESETS } from './defaultRules';
 import { Navbar } from './components/Navbar';
 import { LexerPlayground } from './components/LexerPlayground';
+import { RuleDrawer } from './components/RuleDrawer';
 
+/**
+ * Munch is one workbench: the lexical analyzer. Everything the theory needs to
+ * show lives on this screen — the token stream and both traces in the main
+ * columns, and the specification (rules) plus the languages it cannot express
+ * (limits) in the drawer.
+ */
 export const App: React.FC = () => {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
@@ -17,6 +24,7 @@ export const App: React.FC = () => {
     LANGUAGE_PRESETS.javascript.rules
   );
   const [resetSignal, setResetSignal] = useState(0);
+  const [rulesOpen, setRulesOpen] = useState(false);
 
   // Sync theme with body class + <html data-theme="...">
   useEffect(() => {
@@ -61,7 +69,6 @@ export const App: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', width: '100%', overflow: 'hidden' }}>
-      {/* Top Navbar */}
       <Navbar
         projectName={projectName}
         setProjectName={setProjectName}
@@ -73,9 +80,10 @@ export const App: React.FC = () => {
         theme={theme}
         setTheme={setTheme}
         onReset={handleReset}
+        rulesOpen={rulesOpen}
+        onToggleRules={() => setRulesOpen(open => !open)}
       />
 
-      {/* Main Workbench Viewport */}
       <main className="app-main" style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <LexerPlayground
           sourceCode={sourceCode}
@@ -84,6 +92,13 @@ export const App: React.FC = () => {
           resetSignal={resetSignal}
         />
       </main>
+
+      <RuleDrawer
+        open={rulesOpen}
+        onClose={() => setRulesOpen(false)}
+        rules={rules}
+        onChange={setRules}
+      />
     </div>
   );
 };

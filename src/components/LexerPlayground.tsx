@@ -8,6 +8,7 @@ import { compileRegexToDfa } from '../engine/regexToAutomaton';
 import { simulateAutomaton } from '../engine/automaton';
 import { deriveDfaPanelModel } from '../engine/dfaPanelModel';
 import { buildSyntaxSegments } from '../engine/syntaxHighlight';
+import { CompilePanel } from './CompilePanel';
 
 interface LexerPlaygroundProps {
   sourceCode: string;
@@ -94,6 +95,7 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [playSpeed, setPlaySpeed] = useState(400);
   const [activePanel, setActivePanel] = useState<'trace' | 'dfa' | 'diagnostics'>('trace');
+  const [dfaMode, setDfaMode] = useState<'recognizer' | 'compile'>('recognizer');
   const [dfaCharIdx, setDfaCharIdx] = useState(0);
   const [dfaPlaying, setDfaPlaying] = useState(false);
 
@@ -209,6 +211,16 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
     () => deriveDfaPanelModel(dfaSteps, dfaCharIdx),
     [dfaSteps, dfaCharIdx]
   );
+
+  // Rule shown in the construction view: the selected token's rule when there is
+  // one, otherwise the first enabled rule, so the view is never empty.
+  const compileRule = useMemo(() => {
+    if (selectedToken) {
+      const rule = rules.find(r => r.name === selectedToken.type);
+      if (rule) return rule;
+    }
+    return rules.find(r => r.enabled);
+  }, [selectedToken, rules]);
 
   // Focusing the editor on a coarse pointer (touch) pops the on-screen keyboard,
   // which covers the panel the user just tapped. Set the selection range either
@@ -483,19 +495,52 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
         <div className="lp-dfa" style={{ flex: '0 0 auto', height: dfaHeight, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
           <div className="panel-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-              <span className="panel-label">Token Recognizer DFA</span>
-              {selectedToken && (
+              <span className="panel-label">
+                {dfaMode === 'recognizer' ? 'Token Recognizer DFA' : 'Rule Construction'}
+              </span>
+              {dfaMode === 'recognizer' && selectedToken && (
                 <span className="badge badge-blue">
                   {selectedToken.type} · "{selectedToken.lexeme.slice(0, 24)}"
                 </span>
               )}
+              {dfaMode === 'compile' && compileRule && (
+                <span className="badge badge-blue">{compileRule.name}</span>
+              )}
             </div>
-            <button className="btn-icon"
-              onClick={() => dfaSplit.setCollapsed(c => !c)}
-              title="Minimize DFA panel">
-              ▾
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <button
+                className={`tab-button${dfaMode === 'recognizer' ? ' active' : ''}`}
+                style={{ fontSize: 11, padding: '2px 8px' }}
+                onClick={() => setDfaMode('recognizer')}
+                title="The machine that recognises the selected token"
+              >
+                Recognizer
+              </button>
+              <button
+                className={`tab-button${dfaMode === 'compile' ? ' active' : ''}`}
+                style={{ fontSize: 11, padding: '2px 8px' }}
+                onClick={() => setDfaMode('compile')}
+                title="How the selected rule is built: syntax tree → NFA → DFA → minimal DFA"
+              >
+                Construct
+              </button>
+              <button className="btn-icon"
+                onClick={() => dfaSplit.setCollapsed(c => !c)}
+                title="Minimize DFA panel">
+                ▾
+              </button>
+            </div>
           </div>
+
+          {dfaMode === 'compile' && (
+            <CompilePanel
+              rule={compileRule}
+              lexeme={selectedToken && compileRule?.name === selectedToken.type ? selectedToken.lexeme : undefined}
+            />
+          )}
+
+          {dfaMode === 'recognizer' && (
+          <>
           <div className="lp-dfa-graph" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
             <AutomatonGraph automaton={tokenAutomaton} activeStates={dfaModel.activeStates} activeTransition={activeTransition} interactive />
             {selectedToken && !tokenAutomaton && (
@@ -608,6 +653,8 @@ export const LexerPlayground: React.FC<LexerPlaygroundProps> = ({
                     </div>
                   )}
             </div>
+          )}
+          </>
           )}
         </div>
         )}
